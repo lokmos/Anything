@@ -14,33 +14,21 @@ paginate: true
 
 ## 量子动力学研究背景
 
-- **多体量子系统的非平衡动力学研究极具挑战性**
-  - 粒子间强相互作用导致计算复杂度指数增长
-  - 传统方法难以有效模拟中长期动力学
 
-- **现有数值方法的主要瓶颈**
-  - 精确对角化仅限于小规模系统，无法扩展
-  - 张量网络方法受限于纠缠障碍（Entanglement Barrier）
+量子系统的演化由**时依薛定谔方程**控制：
 
-- **亟需新方法突破当前局限性**
-  - 发展高效、准确的量子动力学模拟技术
-  - 探索可行的中等尺度时间演化问题
+$$
+i\hbar \frac{d}{dt} \lvert \psi(t) \rangle = H \lvert \psi(t) \rangle
+$$
 
----
+从数值角度看，模拟量子系统的核心任务是：
 
-## 创新方法概述：CUT + 扰乱变换
+- **将哈密顿量 $H$ 多次作用在波函数 $\lvert \psi \rangle$ 上，以获得时间演化状态。**
 
-- **核心思想**：
-  - 将经典的 **连续酉变换（CUT / Flow Equations）** 与新提出的 **扰乱变换（Scrambling Transforms）** 相结合。
-  - 先用扰乱变换“打乱”哈密顿量的近简并结构，再用 CUT 高效对角化。
+假设每个粒子是自旋-$\frac{1}{2}$（$d=2$），粒子数为 $L$，那么：
 
-- **关键优势**：
-  - 显著提高了 CUT 方法的 **收敛性与精度**。
-  - 可处理 **大规模哈密顿量** 与 **长时间动力学**，适用于一维与二维无序系统。
-
-- **与张量网络方法的区别**：
-  - 张量网络受限于 **纠缠增长**（Entanglement Barrier）。
-  - 本方法限制来自于 **近似变换的精度**，在实践中更容易控制。
+- $\lvert \psi(t) \rangle \in \mathbb{C}^{2^L}$
+- $H \in \mathbb{C}^{2^L \times 2^L}$
 
 ---
 
@@ -51,15 +39,11 @@ paginate: true
   $$ H(l) = U^\dagger(l)\, H\, U(l), \quad \frac{dH}{dl} = [\eta(l), H(l)] $$
 
 - **流时间 $l$**：一种“算法时间”，从 $l = 0$（初始）演化至 $l \to \infty$（对角化）
-
-- **数值实现**：
-  - $H^{(2)}$：复杂度 $\mathcal{O}(L^2)$
-  - $H^{(4)}$：复杂度 $\mathcal{O}(L^4)$
-  - 截断至四阶，避免高阶爆炸
+- **生成元 $\eta(l)$**：控制了每一步变换的方向，有不同的生成算法
 
 ---
 
-## 多维系统的一维展开
+## 二维系统的一维展开
   通过一维化，CUT 可以处理高维的系统
 
 - **展开方法**：
@@ -122,8 +106,11 @@ paginate: true
   - 目的是“打破简并”，提升 CUT 的收敛性
 
 - **扰乱变换的数学形式**：
-  $$ dS(l) = \exp\left(-\lambda(l)\, dl\right) $$
-  - 其中 $\lambda(l)$ 是专门设计的生成元，用于激活近简并态间的扰动
+  引入一个额外的酉变换 $S(l)$，先将系统“扰乱”：
+
+$$
+H'(l) = S(l) H(l) S^\dagger(l)
+$$
 
 - **机制说明**：
   - 当能级差 $|H_{ii}^{(2)} - H_{jj}^{(2)}|$ 较小，扰乱变换将主动干预
@@ -134,6 +121,109 @@ paginate: true
 ## 扰动变换示例
 
 ![扰乱变换示意图](../Anything/Pictures/Scrambing.png)
+
+---
+
+## 哈密顿量计算的 GPU 加速
+
+
+### 哈密顿量分解
+```python
+# 非相互作用部分
+H0 = torch.diag(torch.diag(H))  # 对角
+V0 = H - H0                     # 非对角
+```
+
+### 实现
+
+- $H(l)$ 拆分为对角/非对角项
+- 使用 JIT 编译优化实现高效的张量收缩计算
+
+---
+
+
+## 量子动力学计算的其他 GPU 优化
+
+### 动态演化优化
+```python
+def flow_dyn_int(n, J, H0, V0, Hint, num, dl_list):
+    ...
+    for t in range(len(tlist)):
+        num_t[t] = contract(eta0, num, 
+                          method='jit')
+```
+
+### 本征值计算优化
+```python
+def flow_levels(n, array, intr):
+    ...
+    H = array[0].to(device)
+    return torch.linalg.eigvalsh(H)
+```
+
+---
+
+## 量子动力学计算的其他 GPU 优化
+
+### 张量网络优化
+```python
+@torch.jit.script
+def con_vec42_comp(A, B):
+    ...
+    # 并行计算张量收缩
+    C = torch.einsum('ijkl,lm->ijkm', A, B)
+    return C
+```
+
+### 内存管理优化
+```python
+def optimize_memory():
+    torch.cuda.empty_cache()
+    tensor = torch.zeros(size, 
+                        pin_memory=True)
+    with torch.cuda.stream(stream):
+        tensor = tensor.to(device)
+```
+---
+
+## 缺乏结构压缩导致资源浪费
+
+主流的 CUT 方法虽然在逻辑上采用了稀疏矩阵的方式，但在实际存储的时候，依然是全量存储。
+- 实际测试中，在一维系统的不同状态中，哈密顿量中的非零项不会超过矩阵规模的10%；在二维系统中会更加稠密，但依然有大量压缩空间。
+
+---
+
+## 测试结果
+
+![width:1200px height:580px](Pictures/output.png)
+
+---
+
+## 已尝试的矩阵压缩策略
+### Tensor Train (TT) 分解
+- 将 $H(l)$ 表示为若干低秩张量链的乘积结构，极大降低存储复杂度。
+- 适合 GPU 上的并行 contraction 操作，压缩效率较好。
+- TT 分解本质上是近似压缩，存在截断误差，实际测试中，误差在 5% 以内，需要考虑保留更高阶矩阵。
+
+### 低秩分解（Low-Rank Decomposition）
+
+- 初期压缩效果良好，但在 CUT 的更新流动中往往难以维持固定秩，从而导致秩爆炸或误差传播。
+- 在短期演化测试中表现良好，误差和 TT 近似，但计算更快
+
+---
+
+## 哈密顿量表示为 pauli 字符串（GPU 实现）
+CUT 的主方程：
+$$
+\frac{dH(l)}{dl} = [\eta(l), H(l)]
+$$
+张量结构说明
+
+- $H(l)$ 表示为一组 Pauli 张量项之和：
+  $$
+  H(l) = \sum_\alpha c_\alpha(l)\, P_\alpha
+  $$
+- 每个 $P_\alpha$ 为 $L$ 位长的 Pauli 字符串，如 $\sigma^z_1 \sigma^x_3$
 
 ---
 
@@ -162,9 +252,15 @@ paginate: true
 - 在 CUT 过程中，$O(l)$ 与 $H(l)$ 一同被变换到对角基；
 - 对角基中的本征态是**张量积态**，形式简单；
 - 物理量可直接通过**随机采样本征态**计算：
-  $$
-  \langle O \rangle = \frac{1}{\mathcal{N}_s} \sum_{n=1}^{\mathcal{N}_s} \langle E_n | O | E_n \rangle
-  $$
+ ```python
+ def nstate(n, a):
+    if a == 'random':
+        state0 = np.random.choice([0., 1.0], n) 
+    elif a == 'random_half':
+        state0 = np.array([1. for i in range(n//2)] + 
+                         [0.0 for i in range(n//2)])
+        np.random.shuffle(state0) 
+  ```
 
 ---
 
@@ -176,82 +272,17 @@ paginate: true
 
 ---
 
-## 哈密顿量 $H(l)$ 的流动（GPU 实现）
-CUT 的主方程：
-$$
-\frac{dH(l)}{dl} = [\eta(l), H(l)]
-$$
-张量结构说明
-
-- $H(l)$ 表示为一组 Pauli 张量项之和：
-  $$
-  H(l) = \sum_\alpha c_\alpha(l)\, P_\alpha
-  $$
-- 每个 $P_\alpha$ 为 $L$ 位长的 Pauli 字符串，如 $\sigma^z_1 \sigma^x_3$
-
----
-
-## 生成元 $\eta(l)$ 的构造（GPU 实现）
-
-### 定义：
-$$
-\eta(l) = [H_{\text{diag}}, H_{\text{off}}]
-$$
-
-### 实现
-
-- $H(l)$ 拆分为对角/非对角项（基于 Pauli 字符串结构）
-- GPU 并行对每一对张量项执行对易子计算
-- 结构复用 $H(l)$ 表示，无需新格式
-
----
-
-## 缺乏结构压缩导致资源浪费
-
-主流的 CUT 方法虽然在逻辑上采用了稀疏矩阵的方式，但在实际存储的时候，依然是全量存储。
-- 实际测试中，在一维系统的不同状态中，哈密顿量中的非零项不会超过矩阵规模的10%；在二维系统中会更加稠密，但依然有大量压缩空间。
-- 即使采用了初始化的随机扰动，这些变化也集中在对角线附近的项，不会扩散到整个矩阵。
-
----
-
-## 已尝试的矩阵压缩策略
-### Tensor Train (TT) 分解
-- 将 $H(l)$ 表示为若干低秩张量链的乘积结构，极大降低存储复杂度。
-- 适合 GPU 上的并行 contraction 操作，压缩效率较好。
-- TT 分解本质上是近似压缩，存在截断误差，实际测试中，误差在 5% 以内，需要考虑保留更高阶矩阵。
-
-### 低秩分解（Low-Rank Decomposition）
-
-- 初期压缩效果良好，但在 CUT 的更新流动中往往难以维持固定秩，从而导致秩爆炸或误差传播。
-- 在短期演化测试中表现良好，误差和 TT 近似，但计算更快
-
-
----
-
 ## 数据传输瓶颈
 
 ### 出现位置
 
 | 场景 | 描述 | 问题 |
 |------|------|------|
-| Kernel 调用前后 | 主机端准备结构体传入 GPU | 结构体大，传输慢 |
 | 系数剪枝 | GPU 计算后结果回传 CPU 判断 | 中断 GPU 处理流程 |
 | 张量项更新 | 新项生成后回传 CPU 合并 | GPU 无结构去重能力 |
 | 流动观测输出 | 每步需输出 $H(l)$ 或 $O(l)$ | 频繁拷贝数据慢 |
 | 调试与可视化 | 状态输出回传 host | 测试流程耗时长 |
 
----
-
-## 优化 GPU/CPU 数据传输策略
-
-### 可行优化路径
-
-| 方向 | 策略 | 描述 |
-|------|------|------|
-| 减少传输频次 | 延迟传输 | 多步数据 batch 输出 |
-| 避免来回 | GPU 内剪枝 | 合并 + 删除逻辑直接在 device 中执行 |
-| 去除 host 控制 | CUDA Graph | 将调度逻辑写入 CUDA graph |
-| 支持动态数据 | memory pooling | 自定义内存池以支持结构变化张量更新 |
 
 ---
 
