@@ -6,7 +6,7 @@ paginate: true
 
 <!-- _class: lead, align-center -->
 
-# 中期答辩
+# 中期答辩：基于内存与计算平衡的量子动力学模拟优化
 
 <p align="center">周予恺  <br>2025年6月3日</p>
 
@@ -25,7 +25,7 @@ $$
 
 - **将哈密顿量 $H$ 多次作用在波函数 $\lvert \psi \rangle$ 上，以获得时间演化状态。**
 
-假设每个粒子是自旋-$\frac{1}{2}$（$d=2$），粒子数为 $L$，那么：
+假设每个粒子是自旋-$\frac{1}{2}$，粒子数为 $L$，那么：
 
 - $\lvert \psi(t) \rangle \in \mathbb{C}^{2^L}$
 - $H \in \mathbb{C}^{2^L \times 2^L}$
@@ -35,12 +35,13 @@ $$
 ## 流方程方法（CUT）
 
 - **核心思想**：通过连续酉变换对角化哈密顿量  
+  $$ H(l) = U^\dagger(l)\, H\, U(l) $$
   $$ dU(l) = \exp(-\eta(l)\,dl) = 1 - \eta(l)\,dl $$  
-  $$ H(l) = U^\dagger(l)\, H\, U(l), \quad \frac{dH}{dl} = [\eta(l), H(l)] $$
+  $$ \quad \frac{dH}{dl} = [\eta(l), H(l)] $$
 
 - **流时间 $l$**：一种“算法时间”，从 $l = 0$（初始）演化至 $l \to \infty$（对角化）
 - **生成元 $\eta(l)$**：控制了每一步变换的方向，有不同的生成算法
-
+- **对易子[A, B]** = AB - BA
 ---
 
 ## 二维系统的一维展开
@@ -63,7 +64,7 @@ $$
 
 ## 一维化示例
 
-![一维变换示意图](../Anything/Pictures/1D.png)
+![一维变换示意图](Pictures/1D.png)
 
 ---
 
@@ -72,7 +73,7 @@ $$
 - CUT（流方程）方法通过连续酉变换对角化哈密顿量：
   $$ \frac{dH(l)}{dl} = [\eta(l), H(l)] $$
 
-- 通常选择的生成元为：
+- 生成元为：
   $$ \eta(l) = [H_0(l), V(l)] $$
   - $H_0(l)$：哈密顿量的对角部分
   - $V(l)$：哈密顿量的非对角部分
@@ -84,10 +85,7 @@ $$
 
 ## 问题本质
 
-- 在 Wegner 生成元下，$V(l)$ 的平方范数满足：
-  $$ \frac{d}{dl} \|V(l)\|^2 = -2 \|\eta(l)\|^2 \leq 0 $$
-
-- 然而若系统中存在多个 $i \ne j$ 使得：
+- 若系统中存在多个 $i \ne j$ 使得：
   $$ |H_{ii}^{(2)}(0) - H_{jj}^{(2)}(0)| \ll 1 $$
   即出现**近简并对角元素**
 
@@ -120,70 +118,15 @@ $$
 
 ## 扰动变换示例
 
-![扰乱变换示意图](../Anything/Pictures/Scrambing.png)
-
----
-
-## 哈密顿量计算的 GPU 加速
-
-
-### 哈密顿量分解
-```python
-# 非相互作用部分
-H0 = torch.diag(torch.diag(H))  # 对角
-V0 = H - H0                     # 非对角
-```
-
-### 实现
-
-- $H(l)$ 拆分为对角/非对角项
-- 使用 JIT 编译优化实现高效的张量收缩计算
+![扰乱变换示意图](Pictures/Scrambing.png)
 
 ---
 
 
-## 量子动力学计算的其他 GPU 优化
+## 量子动力学计算的 GPU 优化
 
-### 动态演化优化
-```python
-def flow_dyn_int(n, J, H0, V0, Hint, num, dl_list):
-    ...
-    for t in range(len(tlist)):
-        num_t[t] = contract(eta0, num, 
-                          method='jit')
-```
+![width:800px height: 300px](Pictures/general.drawio.png)
 
-### 本征值计算优化
-```python
-def flow_levels(n, array, intr):
-    ...
-    H = array[0].to(device)
-    return torch.linalg.eigvalsh(H)
-```
-
----
-
-## 量子动力学计算的其他 GPU 优化
-
-### 张量网络优化
-```python
-@torch.jit.script
-def con_vec42_comp(A, B):
-    ...
-    # 并行计算张量收缩
-    C = torch.einsum('ijkl,lm->ijkm', A, B)
-    return C
-```
-
-### 内存管理优化
-```python
-def optimize_memory():
-    torch.cuda.empty_cache()
-    tensor = torch.zeros(size, 
-                        pin_memory=True)
-    with torch.cuda.stream(stream):
-        tensor = tensor.to(device)
-```
 ---
 
 ## 缺乏结构压缩导致资源浪费
@@ -195,7 +138,7 @@ def optimize_memory():
 
 ## 测试结果
 
-![width:1200px height:580px](Pictures/output.png)
+![width:1200px height:580px](Pictures/output1.png)
 
 ---
 
@@ -224,6 +167,26 @@ $$
   H(l) = \sum_\alpha c_\alpha(l)\, P_\alpha
   $$
 - 每个 $P_\alpha$ 为 $L$ 位长的 Pauli 字符串，如 $\sigma^z_1 \sigma^x_3$
+
+---
+
+## Pauli 基底与张量结构
+
+- 单量子比特的 Pauli 基底：
+
+  $$
+  \sigma^0 = I = \begin{bmatrix} 1 & 0 \\ 0 & 1 \end{bmatrix},\quad
+  \sigma^x = \begin{bmatrix} 0 & 1 \\ 1 & 0 \end{bmatrix},\quad
+  \sigma^y = \begin{bmatrix} 0 & -i \\ i & 0 \end{bmatrix},\quad
+  \sigma^z = \begin{bmatrix} 1 & 0 \\ 0 & -1 \end{bmatrix}
+  $$
+
+- $L$ 比特系统的 Pauli 张量共有 $4^L$ 个，构成 $2^L \times 2^L$ 空间的完备基
+
+- 例如 $P_\alpha = \sigma^z_1 \sigma^x_3$ 表示：
+  $$
+  P_\alpha = \sigma^z \otimes I \otimes \sigma^x \otimes \cdots \otimes I
+  $$
 
 ---
 
@@ -269,19 +232,6 @@ $$
 - 利用对角基下的结构简洁性：本征态 $\lvert E_n \rangle$ 为 product states，直接在对角基中评估
 
 ![改进示意图](../Anything/Pictures/Modify.png)
-
----
-
-## 数据传输瓶颈
-
-### 出现位置
-
-| 场景 | 描述 | 问题 |
-|------|------|------|
-| 系数剪枝 | GPU 计算后结果回传 CPU 判断 | 中断 GPU 处理流程 |
-| 张量项更新 | 新项生成后回传 CPU 合并 | GPU 无结构去重能力 |
-| 流动观测输出 | 每步需输出 $H(l)$ 或 $O(l)$ | 频繁拷贝数据慢 |
-| 调试与可视化 | 状态输出回传 host | 测试流程耗时长 |
 
 
 ---
