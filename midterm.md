@@ -40,7 +40,7 @@ $$
   $$ \quad \frac{dH}{dl} = [\eta(l), H(l)] $$
 
 - **流时间 $l$**：一种“算法时间”，从 $l = 0$（初始）演化至 $l \to \infty$（对角化）
-- **生成元 $\eta(l)$**：控制了每一步变换的方向，有不同的生成算法
+- **生成元 $\eta(l)$**：控制了每一步变换的方向
 - **对易子[A, B]** = AB - BA
 ---
 
@@ -136,13 +136,7 @@ $$
 
 ---
 
-## 测试结果
-
-![width:1200px height:580px](Pictures/output1.png)
-
----
-
-## 已尝试的矩阵压缩策略
+## 矩阵压缩策略
 ### Tensor Train (TT) 分解
 - 将 $H(l)$ 表示为若干低秩张量链的乘积结构，极大降低存储复杂度。
 - 适合 GPU 上的并行 contraction 操作，压缩效率较好。
@@ -151,22 +145,7 @@ $$
 ### 低秩分解（Low-Rank Decomposition）
 
 - 初期压缩效果良好，但在 CUT 的更新流动中往往难以维持固定秩，从而导致秩爆炸或误差传播。
-- 在短期演化测试中表现良好，误差和 TT 近似，但计算更快
-
----
-
-## 哈密顿量表示为 pauli 字符串（GPU 实现）
-CUT 的主方程：
-$$
-\frac{dH(l)}{dl} = [\eta(l), H(l)]
-$$
-张量结构说明
-
-- $H(l)$ 表示为一组 Pauli 张量项之和：
-  $$
-  H(l) = \sum_\alpha c_\alpha(l)\, P_\alpha
-  $$
-- 每个 $P_\alpha$ 为 $L$ 位长的 Pauli 字符串，如 $\sigma^z_1 \sigma^x_3$
+- 在短期演化测试中表现良好
 
 ---
 
@@ -190,7 +169,22 @@ $$
 
 ---
 
-## CUT 方法的数值瓶颈
+## 哈密顿量表示为 pauli 字符串
+CUT 的主方程：
+$$
+\frac{dH(l)}{dl} = [\eta(l), H(l)]
+$$
+张量结构说明
+
+- $H(l)$ 表示为一组 Pauli 张量项之和：
+  $$
+  H(l) = \sum_\alpha c_\alpha(l)\, P_\alpha
+  $$
+- 每个 $P_\alpha$ 为 $L$ 位长的 Pauli 字符串，如 $\sigma^z_1 \sigma^x_3$
+
+---
+
+## CUT 方法的计算瓶颈
 
 ###  背景：
 
@@ -215,23 +209,28 @@ $$
 - 在 CUT 过程中，$O(l)$ 与 $H(l)$ 一同被变换到对角基；
 - 对角基中的本征态是**张量积态**，形式简单；
 - 物理量可直接通过**随机采样本征态**计算：
- ```python
- def nstate(n, a):
-    if a == 'random':
-        state0 = np.random.choice([0., 1.0], n) 
-    elif a == 'random_half':
-        state0 = np.array([1. for i in range(n//2)] + 
-                         [0.0 for i in range(n//2)])
-        np.random.shuffle(state0) 
-  ```
+
+期望值：
+
+$$
+\langle O \rangle = \sum_i |c_i|^2 \cdot \langle \phi_i | O | \phi_i \rangle
+$$
+
+采样估计：
+
+$$
+\langle O \rangle \approx \frac{1}{N} \sum_{i=1}^N \langle \phi_i | O | \phi_i \rangle
+$$
+
+当本征态服从典型性分布时，两者误差很小。
 
 ---
 
 ## 改进结果
 
-- 利用对角基下的结构简洁性：本征态 $\lvert E_n \rangle$ 为 product states，直接在对角基中评估
+- 利用对角基下的结构简洁性，直接在对角基中评估
 
-![改进示意图](../Anything/Pictures/Modify.png)
+![改进示意图](Pictures/Modify.png)
 
 
 ---
@@ -240,10 +239,10 @@ $$
 
 ### 系统对称性
 
-- 多体量子系统中常存在**守恒量**与**空间对称性**，Hamiltonian 可**block-diagonal** 化，简化演化空间
+- 多体量子系统中常存在**守恒量**与**空间对称性**，简化演化空间
 
 ### ED和张量方法已经利用了对称性
-- ED（精确对角化：预构建特定对称子空间，仅对角对应 block 
+- ED精确对角化：预构建特定对称子空间，仅对角对应 block 
 - Tensor Network：张量结构中引入对称路径标签，剪枝非法演化路径 
 
 ### CUT 方法目前缺失
